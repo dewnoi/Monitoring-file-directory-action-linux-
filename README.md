@@ -8,4 +8,4 @@
 
 4. run "sudo ./monitor <folder-path>"
 
-5. After finished "sudo rmmod monitor_kmod.ko"
+5. After finished "sudo rmmod monitor_kmod"
