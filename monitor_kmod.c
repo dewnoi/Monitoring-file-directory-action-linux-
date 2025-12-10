@@ -9,8 +9,10 @@
 #include <linux/namei.h>
 #include <linux/cdev.h>
 #include <linux/device.h> 
+#include <linux/jiffies.h>
 
 #define DEVICE_NAME "project_monitor"
+#define DEBOUNCE_INTERVAL 500
 #define BUF_LEN 256
 
 MODULE_LICENSE("GPL");
@@ -24,6 +26,8 @@ static unsigned long target_inode = 0;
 static DECLARE_WAIT_QUEUE_HEAD(wait_q);
 static struct class* monitor_class  = NULL;
 static struct device* monitor_device = NULL;
+static unsigned long last_write_inode = 0; 
+static unsigned long last_write_time = 0; 
 
 static int handler_pre_mkdir(struct kprobe *p, struct pt_regs *regs)
 {
@@ -118,18 +122,28 @@ static int handler_pre_read(struct kprobe *p, struct pt_regs *regs)
 static int handler_pre_write(struct kprobe *p, struct pt_regs *regs)
 {
     struct file *file = (struct file *)regs->di;
-
     if (!file || !file->f_path.dentry) return 0;
 
     struct dentry *dentry = file->f_path.dentry;
     struct inode *parent_inode = dentry->d_parent->d_inode;
+    struct inode *file_inode = dentry->d_inode; 
     const char *name = dentry->d_name.name;
 
     if (target_inode != 0 && parent_inode->i_ino != target_inode) {
         return 0;
     }
 
-    snprintf(msg_buffer, BUF_LEN, "[FILE] Write file '%s' \n", name);
+    unsigned long now = jiffies;
+    
+    if (file_inode->i_ino == last_write_inode && 
+        time_before(now, last_write_time + msecs_to_jiffies(DEBOUNCE_INTERVAL))) {
+        return 0; 
+    }
+
+    last_write_inode = file_inode->i_ino;
+    last_write_time = now;
+
+    snprintf(msg_buffer, BUF_LEN, "[FILE] Write file '%s'\n", name);
     msg_len = strlen(msg_buffer);
     data_ready = 1;
     wake_up_interruptible(&wait_q);
